@@ -738,6 +738,39 @@ class AIJobMatch(BaseModel):
 class AIAnalysisResponse(BaseModel):
     matches: List[AIJobMatch]
 
+class JobApplyRequest(BaseModel):
+    job_id: str
+applied_jobs_database = set()
+
+
+@app.post("/api/apply")
+def apply_to_job(request_data: JobApplyRequest):
+    job_id = request_data.job_id
+    
+    applied_jobs_database.add(job_id)
+    
+    print("\n" + "="*40)
+    print(f" CANLI BAŞVURU GELDİ!")
+    print(f" Başvurulan İlan ID: {job_id}")
+    print(f"Güncel Başvuru Havuzumuz: {list(applied_jobs_database)}")
+    print("="*40 + "\n")
+    
+    return {
+        "status": "success",
+        "message": f"Successfully applied to job {job_id}"
+    }
+@app.get("/api/applied-jobs")
+def get_applied_jobs():
+    applied_details = []
+    
+    for job_id in applied_jobs_database:
+        for job in mock_jobs:
+            if job["id"] == job_id:
+                applied_details.append(job)
+                break 
+                
+    return applied_details
+
 @app.get("/api/jobs")
 def get_jobs():
     return mock_jobs
