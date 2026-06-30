@@ -1,12 +1,26 @@
 import os
+import json
+from typing import List
+from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from typing import List
+from dotenv import load_dotenv
 from google import genai
 from google.genai import types
-import json
+
+base_dir = Path(__file__).resolve().parent
+env_path = base_dir / ".env"
+
+if env_path.exists():
+    load_dotenv(dotenv_path=env_path)
+else:
+    print(f" UYARI: .env dosyası bulunamadı! Aranan konum: {env_path}")
 
 app = FastAPI(title="CareerAI API")
+
+api_key = os.getenv("GEMINI_API_KEY")
+if not api_key:
+    print("GEMINI_API_KEY ortam değişkeni (env) okunamadı!")
 
 mock_jobs = [
     {
@@ -782,10 +796,38 @@ def get_job_detail(job_id: str):
             return job
     return {"error": "İlan bulunamadı"}
 
+@app.delete("/api/applications/{job_id}")
+def cancel_application(job_id: str):
+    if job_id in applied_jobs_database:
+       applied_jobs_database.remove(job_id)
+       print(f" BAŞVURU GERİ ÇEKİLDİ!")
+       print(f"Silinen İlan ID: {job_id}")
+       print(f"Güncel Başvuru Havuzumuz: {list(applied_jobs_database)}")
+       print("="*40 + "\n")
+       return {"status": "success", "message": f"Application to {job_id} cancelled successfully."}
+    else:
+        raise HTTPException(status_code=404, detail="Başvuru zaten bulunamadı.")
+
 @app.post("/api/analyze", response_model=AIAnalysisResponse)
 def analyze_cv(request: CVRequest):
-    api_key = os.environ.get("GEMINI_API_KEY")
-    client = genai.Client(api_key=api_key)
+    # .env'den anahtarı çekiyoruz
+    gemini_key = os.getenv("GEMINI_API_KEY") 
+    
+    # Hata ayıklama için terminale yazdıralım (İlk 5 karakterini görerek test edelim)
+    if gemini_key:
+        print(f"🔗 API Key başarıyla okundu: {gemini_key[:5]}***")
+    else:
+        print("❌ API Key hala OKUNAMIYOR!")
+        raise HTTPException(
+            status_code=500, 
+            detail="Sunucu hatası: .env dosyasından GEMINI_API_KEY okunamadı!"
+        ) 
+        
+    
+    client = genai.Client(api_key=gemini_key)
+    
+    jobs_json = json.dumps(mock_jobs, ensure_ascii=False)
+    
     prompt = f"""
     You are an expert AI Career Assistant. Your job is to analyze the provided user's CV text and compare it against the JSON list of available internship jobs.
     For each job, calculate a realistic matching score (0-100) and provide structured feedback.
@@ -795,19 +837,26 @@ def analyze_cv(request: CVRequest):
     --- END OF USER CV ---
     
     --- START OF AVAILABLE JOBS ---
-    {mock_jobs}
+    {jobs_json}
     --- END OF AVAILABLE JOBS ---
     """
+    
     try:
         response = client.models.generate_content(
             model='gemini-2.5-flash',
             contents=prompt,
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
-                response_schema=AIAnalysisResponse,
+                response_schema=AIAnalysisResponse.model_json_schema(),
+                temperature=0.1,  
             ),
         )
+        
         return json.loads(response.text)
         
+    except json.JSONDecodeError as je:
+        print(f" JSON Çözümleme Hatası: {str(je)}")
+        raise HTTPException(status_code=500, detail="Gemini geçersiz bir JSON yapısı döndürdü.")
     except Exception as e:
+        print(f"\n GEMINI TARAFINDA HATA OLUŞTU: {str(e)}\n")
         raise HTTPException(status_code=500, detail=f"Gemini Hatası: {str(e)}")
